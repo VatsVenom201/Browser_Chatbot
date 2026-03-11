@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-dotenv
+beautifulsoup4
+trafilatura
+langchain
+langchain-core
+langchain-text-splitters
+chromadb
+sentence-transformers
+httpx
+requests
+lxml_html_clean
