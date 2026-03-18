@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8000"; // Dev. For production: "https://your-render-url.onrender.com"
+const API_BASE = "https://browser-chatbot-backend.onrender.com"; // Dev. For production: "https://your-render-url.onrender.com"
 let sessionId = crypto.randomUUID();
 
 // Persist session ID across panel opens
@@ -10,8 +10,15 @@ chrome.storage.local.get(["session_id"], (result) => {
     }
 });
 
+// ---- Helper: Format AI Response ----
+function formatAiResponse(text) {
+    return text
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // Support **bold**
+        .replace(/\n\n/g, '<div style="margin-bottom: 12px; height: 1px;"></div>') // Paragraph spacing
+        .replace(/\n/g, '<br>'); // Regular line breaks
+}
+
 // ---- Helper: append a message bubble ----
-// If id is given and the element already exists, update it in-place instead of creating a new one
 function appendMessage(role, text, id = null) {
     const chatBox = document.getElementById("chat-box");
     let msgDiv = id ? document.getElementById(id) : null;
@@ -23,7 +30,12 @@ function appendMessage(role, text, id = null) {
         chatBox.appendChild(msgDiv);
     }
 
-    msgDiv.textContent = text;
+    if (role === "ai") {
+        msgDiv.innerHTML = formatAiResponse(text);
+    } else {
+        msgDiv.textContent = text;
+    }
+
     chatBox.scrollTop = chatBox.scrollHeight;
     return msgDiv;
 }
@@ -74,7 +86,6 @@ async function summarize(text) {
 
     setLoading(true);
     const msgId = `msg-${Date.now()}`;
-    // Create the message bubble BEFORE fetching so we hold a stable reference
     const msgDiv = appendMessage("ai", "Summarizing...", msgId);
 
     try {
@@ -84,20 +95,20 @@ async function summarize(text) {
             body: JSON.stringify({
                 session_id: sessionId,
                 text: text,
-                mode: "selected_text"   // backend just truncates & sends to Groq either way
+                mode: "selected_text"
             })
         });
 
         if (!res.ok) {
-            msgDiv.textContent = `Error: Server returned ${res.status}`;
+            msgDiv.innerHTML = formatAiResponse(`Error: Server returned ${res.status}`);
             return;
         }
 
         const fullText = await res.text();
-        msgDiv.textContent = fullText.trim() || "(No summary returned — try again in a few seconds)";
+        msgDiv.innerHTML = formatAiResponse(fullText.trim() || "(No summary returned — try again in a few seconds)");
         document.getElementById("chat-box").scrollTop = document.getElementById("chat-box").scrollHeight;
     } catch (e) {
-        msgDiv.textContent = `Error: ${e.message}`;
+        msgDiv.innerHTML = formatAiResponse(`Error: ${e.message}`);
         console.error("Summarize error:", e);
     } finally {
         setLoading(false);
@@ -114,7 +125,6 @@ document.getElementById("summarize-page-btn").addEventListener("click", async ()
     }
 
     try {
-        // executeScript injects JS on demand - no page refresh needed after extension updates
         const results = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             func: () => document.body.innerText
@@ -129,9 +139,7 @@ document.getElementById("summarize-page-btn").addEventListener("click", async ()
 // ---- Summarize Selected Text ----
 document.getElementById("summarize-selected-btn").addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    // Use sendMessage - content.js stores the last selection on selectionchange
-    // so it survives focus shifts when the side panel button is clicked
+
     chrome.tabs.sendMessage(tab.id, { action: "get_selected_text" }, async (response) => {
         if (chrome.runtime.lastError) {
             appendMessage("ai", "Please refresh the page and try again.");
@@ -169,26 +177,93 @@ document.getElementById("send-btn").addEventListener("click", async () => {
         });
 
         if (!res.ok) {
-            msgDiv.textContent = `Error: Server returned ${res.status}`;
+            msgDiv.innerHTML = formatAiResponse(`Error: Server returned ${res.status}`);
             return;
         }
 
         const fullText = await res.text();
-        msgDiv.textContent = fullText.trim() || "(Empty response — please try again)";
+        msgDiv.innerHTML = formatAiResponse(fullText.trim() || "(Empty response — please try again)");
         document.getElementById("chat-box").scrollTop = document.getElementById("chat-box").scrollHeight;
 
     } catch (e) {
-        msgDiv.textContent = `Error: ${e.message}`;
+        msgDiv.innerHTML = formatAiResponse(`Error: ${e.message}`);
         console.error("Chat error:", e);
     } finally {
         setLoading(false);
     }
 });
 
+// ---- UI Navigation and Drawer Logic ----
+
+const drawer = document.getElementById("side-drawer");
+const overlay = document.getElementById("drawer-overlay");
+const menuToggle = document.getElementById("menu-toggle");
+const closeBtn = document.getElementById("close-drawer");
+const navItems = document.querySelectorAll(".nav-item");
+const pages = document.querySelectorAll(".page");
+const backButtons = document.querySelectorAll(".back-to-home");
+
+function toggleDrawer(open) {
+    drawer.classList.toggle("open", open);
+    overlay.classList.toggle("hidden", !open);
+}
+
+function showPage(pageId) {
+    pages.forEach(p => p.classList.toggle("active", p.id === pageId));
+    navItems.forEach(item => {
+        item.classList.toggle("active", item.getAttribute("data-page") === pageId);
+    });
+    toggleDrawer(false); // Close drawer after selection
+}
+
+menuToggle.addEventListener("click", () => toggleDrawer(true));
+closeBtn.addEventListener("click", () => toggleDrawer(false));
+overlay.addEventListener("click", () => toggleDrawer(false));
+
+navItems.forEach(item => {
+    item.addEventListener("click", () => {
+        const targetPage = item.getAttribute("data-page");
+        showPage(targetPage);
+    });
+});
+
+backButtons.forEach(btn => {
+    btn.addEventListener("click", () => showPage("home-page"));
+});
+
+// Auto-expand textarea (optional UX improvement)
+const textarea = document.getElementById("user-input");
+textarea.addEventListener("input", function() {
+    this.style.height = "auto";
+    this.style.height = (this.scrollHeight) + "px";
+});
+
 // ---- Enter key to send ----
-document.getElementById("user-input").addEventListener("keypress", (e) => {
+textarea.addEventListener("keypress", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         document.getElementById("send-btn").click();
     }
+});
+
+// ---- Feedback Logic ----
+const feedbackBtn = document.getElementById("submit-feedback");
+const feedbackInput = document.getElementById("feedback-input");
+
+feedbackBtn.addEventListener("click", () => {
+    const text = feedbackInput.value.trim();
+    if (!text) {
+        alert("Please type a suggestion first!");
+        return;
+    }
+
+    const email = "vats.chavda@gmail.com";
+    const subject = encodeURIComponent("SiteSense Feedback/Suggestion");
+    const body = encodeURIComponent(text);
+    
+    // Open default mail client
+    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+    
+    // Clear input
+    feedbackInput.value = "";
 });

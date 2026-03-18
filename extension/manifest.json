@@ -1,8 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "RAG Chatbot",
+  "name": "SiteSense",
   "version": "1.0",
-  "description": "Analyze webpage and chat with an AI.",
+  "description": "A smart assistant that lets you chat with webpages, summarize content, and extract key insights instantly using AI.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": [
     "sidePanel",
     "activeTab",
@@ -23,8 +28,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"]
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ]
     }
   ]
 }
